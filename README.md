@@ -136,14 +136,6 @@ Google Cloud offers an **Always Free** tier that includes enough resources to ru
      - Click **Select**.
    - **Firewall**:
      - Leave **Allow HTTP traffic** and **Allow HTTPS traffic** **UNCHECKED**. (Cloudflare Tunnel makes outbound connections; you do **not** need any inbound firewall ports open!).
-   - **Advanced options > Automation > Startup script**:
-     - Expand **Advanced options** > **Management** (or **Automation**).
-     - In the **Startup script** field, paste the following line:
-       ```bash
-       #!/bin/bash
-       echo "ALL ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-       ```
-       *(Note: This guarantees your browser SSH user is automatically granted full administrator `sudo` rights on boot, avoiding GCP OS Login permission restrictions).*
 5. Click **Create**.
 
 ---
@@ -203,7 +195,7 @@ newgrp docker
 Clone this repository on your GCP VM:
 
 ```bash
-git clone https://github.com/<GITHUB_USERNAME>/n8n-selfhost-setup.git ~/n8n-selfhost-setup
+git clone https://github.com/yusuke-iw/n8n-selfhost-setup.git ~/n8n-selfhost-setup
 cd ~/n8n-selfhost-setup
 
 # Copy the environment file template
