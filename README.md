@@ -400,14 +400,16 @@ sudo chmod +x /etc/profile.d/ssh-login-alert.sh
 
 ---
 
-### 2. Cloudflare Edge Security & Attack Alerts
-Cloudflare inspects all inbound traffic at the edge before it ever reaches your server.
+### 2. Cloudflare Tunnel Health & Security Monitoring
+Cloudflare monitors tunnel connectivity and inspects all inbound traffic at the edge before it ever reaches your server:
 
-1. Open [Cloudflare Dashboard](https://dash.cloudflare.com/) and go to **Notifications > Add**.
-2. Set up:
-   - **Security Events Alert**: Sends an email if Cloudflare WAF detects a surge in blocked attacks, malicious payload attempts, or bot probes.
-   - **Access / Audit Log Alerts**: Alerts you if an unauthorized email address repeatedly attempts to request PIN codes on your domain.
-3. Select your email and click **Save**.
+1. **Tunnel Health Alert (Free)**:
+   - In Cloudflare Dashboard, go to **Notifications > Add**.
+   - Filter Product by **Tunnel** (or scroll down) and select **Tunnel Health Alert**.
+   - This sends an immediate email if your server tunnel drops, goes offline, or disconnects.
+2. **Security & WAF Analytics (Free)**:
+   - Under your domain, navigate to **Security > Events**.
+   - Cloudflare logs every blocked request, crawler rejection, and Access challenge in real-time.
 
 ---
 
