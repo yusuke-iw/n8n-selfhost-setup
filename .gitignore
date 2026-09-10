@@ -1,0 +1,15 @@
+# Environment variables (contains sensitive secrets & passwords)
+.env
+*.env.local
+
+# Local storage and database persistent volumes
+data/
+postgres_data/
+local_files/
+
+# OS and IDE temporary files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
