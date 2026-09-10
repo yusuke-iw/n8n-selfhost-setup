@@ -14,14 +14,19 @@ A secure, cost-optimized, and fully automated self-hosted [n8n](https://n8n.io/)
 - [Step 3: Repository & Environment Configuration](#step-3-repository--environment-configuration)
 - [Step 4: Launching n8n with Docker Compose](#step-4-launching-n8n-with-docker-compose)
 - [Step 5: Cloudflare Tunnel Setup (Zero Open Ports & Free SSL)](#step-5-cloudflare-tunnel-setup-zero-open-ports--free-ssl)
-- [Step 6: Security & Search Engine Cloaking](#step-6-security--search-engine-cloaking)
+- [Step 6: Security, Search Engine & AI Cloaking](#step-6-security-search-engine--ai-cloaking)
+  - [1. Cloudflare Access (Protecting the Admin UI)](#1-cloudflare-access-protecting-the-admin-ui)
+  - [2. Webhook & Health Check Bypass (Two-Application Architecture)](#2-webhook--health-check-bypass-two-application-architecture)
+  - [3. Search Engine & AI Crawler Cloaking](#3-search-engine--ai-crawler-cloaking)
+  - [4. Enable 2FA in n8n](#4-enable-2fa-in-n8n)
 - [Step 7: Third-Party Integrations & Webhooks](#step-7-third-party-integrations--webhooks)
   - [Connecting External Services (OAuth 2.0 & API Keys)](#1-connecting-external-services-oauth-20--api-keys)
   - [Inbound Webhooks](#2-inbound-webhooks)
 - [Step 8: Automated Uptime & Downtime Email Alerts](#step-8-automated-uptime--downtime-email-alerts)
+  - [Multi-Layered Automatic Reboot & Self-Healing](#-multi-layered-automatic-reboot--self-healing)
 - [Step 9: Intrusion Detection & Security Alerts](#step-9-intrusion-detection--security-alerts)
   - [1. Instant SSH Terminal Login Alerts](#1-instant-ssh-terminal-login-alerts)
-  - [2. Cloudflare Edge Security & Attack Alerts](#2-cloudflare-edge-security--attack-alerts)
+  - [2. Cloudflare Tunnel Health & Security Monitoring](#2-cloudflare-tunnel-health--security-monitoring)
   - [3. Automated Intrusion Prevention (fail2ban)](#3-automated-intrusion-prevention-fail2ban)
 - [Operational Runbook (Backups, Updates, Logs)](#-operational-runbook)
 
@@ -34,8 +39,8 @@ This self-hosted setup gives you:
 - **Unified GCP Cloud Project**: Your compute VM, OAuth credentials, and integrations live under one tidy cloud project.
 - **Enterprise-Grade Database**: PostgreSQL 16 (optimized for GCP `e2-micro` with tuned buffers and 2GB swap).
 - **Maximum Security**: Zero open firewall ports on your GCP VPC; web UI shielded behind Cloudflare Zero Trust (Email OTP / Google SSO) and Two-Factor Authentication.
-- **Search Engine Blocking**: Hidden from all web crawlers and search engine indexing.
-- **24/7 Health Monitoring**: Instant email alerts when the system goes down and when it recovers.
+- **Search Engine & AI Cloaking**: Hidden from all web crawlers, search engines, and AI scrapers.
+- **24/7 Health Monitoring & Auto-Heal**: Instant email alerts when the system goes down and when it recovers, plus automated self-restart if frozen.
 
 ---
 
@@ -59,6 +64,9 @@ Google Cloud offers an **Always Free** tier that includes enough resources to ru
 > - `us-east1` (South Carolina)
 > - `us-west1` (Oregon)
 
+> [!NOTE]
+> **Console Price Estimator Notice**: When creating the VM, GCP's estimator will display gross pricing (~`US$6.11/mo`). This is normal—the Always Free credit is applied automatically at billing invoice calculation, reducing the net charge to $0.00.
+
 ---
 
 ## 🏗️ System Architecture
@@ -75,8 +83,9 @@ Google Cloud offers an **Always Free** tier that includes enough resources to ru
                        |                 Cloudflare Edge                      |
                        |  - Free SSL / TLS Certificate                        |
                        |  - Cloudflare Access: Email OTP / Google Login       |
-                       |    (Rule: Authenticate Admin, Bypass /webhook/*)     |
+                       |    (App 1: Protect Admin UI | App 2: Bypass Webhook) |
                        |  - X-Robots-Tag: noindex, nofollow (Zero indexing)  |
+                       |  - Block AI scrapers and crawlers: Enabled           |
                        +------------------------------------------------------+
                                                   |
                                 Encrypted Cloudflare Tunnel (Outbound only!)
@@ -91,6 +100,8 @@ Google Cloud offers an **Always Free** tier that includes enough resources to ru
                        |            v (localhost:5678)                        |
                        |  [n8n Container] <====> [PostgreSQL 16 Container]     |
                        |  (max memory: 512MB)    (shared buffers: 64MB)       |
+                       |       ^                                              |
+                       |  [autoheal container] (Watches /healthz, restarts)   |
                        |            |                    |                    |
                        |      Persistent Data      Persistent DB Data         |
                        |  +------------------------------------------------+  |
@@ -119,12 +130,20 @@ Google Cloud offers an **Always Free** tier that includes enough resources to ru
    - **Boot disk**:
      - Click **Change**.
      - Operating system: **Ubuntu**.
-     - Version: **Ubuntu 24.04 LTS** or **Ubuntu 22.04 LTS**.
+     - Version: **Ubuntu 24.04 LTS** (or 22.04 LTS).
      - Boot disk type: **Standard persistent disk** (Do not choose SSD to stay in Always Free).
      - Size: **30 GB** (Maximum free tier allowance).
      - Click **Select**.
    - **Firewall**:
      - Leave **Allow HTTP traffic** and **Allow HTTPS traffic** **UNCHECKED**. (Cloudflare Tunnel makes outbound connections; you do **not** need any inbound firewall ports open!).
+   - **Advanced options > Automation > Startup script**:
+     - Expand **Advanced options** > **Management** (or **Automation**).
+     - In the **Startup script** field, paste the following line:
+       ```bash
+       #!/bin/bash
+       echo "ALL ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+       ```
+       *(Note: This guarantees your browser SSH user is automatically granted full administrator `sudo` rights on boot, avoiding GCP OS Login permission restrictions).*
 5. Click **Create**.
 
 ---
@@ -210,8 +229,11 @@ Set the values:
 - `N8N_EDITOR_BASE_URL`: `https://n8n.yourdomain.com/`
 - `N8N_ENCRYPTION_KEY`: paste the generated random key.
 - `POSTGRES_USER`: `n8n_admin`
-- `POSTGRES_PASSWORD`: a strong password (e.g. `openssl rand -base64 16`)
+- `POSTGRES_PASSWORD`: a strong password (generate using `openssl rand -hex 16`)
 - `POSTGRES_DB`: `n8n_db`
+
+> [!TIP]
+> **Password Best Practice**: Use alphanumeric passwords generated via `openssl rand -hex 16`. Avoid using `$` in passwords inside `.env`, as Docker Compose interprets `$word` as an environment variable interpolation (which blanks out that part of the password).
 
 Save and exit (`Ctrl + O`, `Enter`, `Ctrl + X`).
 
@@ -233,7 +255,8 @@ docker compose ps
 
 You will see:
 - `n8n_postgres`: Status `Up (healthy)` (tuned memory: 64MB shared buffers)
-- `n8n_app`: Status `Up` (bound to `127.0.0.1:5678` with 512MB Node heap limit)
+- `n8n_app`: Status `Up (healthy)` (bound to `127.0.0.1:5678` with 512MB Node heap limit)
+- `n8n_autoheal`: Status `Up` (monitors `/healthz` and auto-restarts if frozen)
 
 To view live startup logs:
 
@@ -250,58 +273,78 @@ Instead of managing Let's Encrypt or opening GCP firewall ingress rules, Cloudfl
 1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/).
 2. Navigate to **Networks > Tunnels** and click **Create a tunnel**.
 3. Select **Cloudflared** and name it `gcp-n8n-tunnel`.
-4. Choose operating system: **Debian / Ubuntu (64-bit)**.
-5. Cloudflare gives you a single command. Copy and run it on your GCP VM:
-   ```bash
-   sudo cloudflared service install <YOUR_TOKEN>
-   ```
-6. Click **Next** to configure the **Public Hostname**:
+4. Choose operating system:
+   - Select: **`Debian`** *(Ubuntu is Debian-based and 100% compatible)*.
+   - Architecture: **`64-bit`**.
+5. Cloudflare will display installation commands. Copy and execute them in your VM SSH terminal:
+   - **Step A (Install package)**: Run the script to add the Cloudflare repository and install `cloudflared`.
+   - **Step B (Connect tunnel)**: Run the command containing your unique token:
+     ```bash
+     sudo cloudflared service install <YOUR_TOKEN>
+     ```
+6. Once connected (green checkmark in dashboard), click **Next** to configure the **Public Hostname**:
    - **Subdomain**: `n8n`
    - **Domain**: `yourdomain.com`
    - **Type**: `HTTP`
    - **URL**: `localhost:5678`
 7. Click **Save tunnel**.
 
-Your n8n instance is now live at `https://n8n.yourdomain.com` with zero open ports on GCP!
+Your n8n instance is now live securely at `https://n8n.yourdomain.com` with zero open ports on GCP!
 
 ---
 
-## Step 6: Security & Search Engine Cloaking
+## Step 6: Security, Search Engine & AI Cloaking
 
-### 1. Cloudflare Access (One-Time PIN to your email)
-In [Cloudflare Zero Trust](https://one.dash.cloudflare.com/):
-1. Go to **Access > Applications > Add an application**.
+To ensure that only you can access the admin UI while allowing webhooks to function and completely blocking search engines and AI bots:
+
+### 1. Cloudflare Access (Protecting the Admin UI)
+In [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/):
+1. Navigate to **Access > Applications > Add an application**.
 2. Select **Self-hosted**.
-3. **Application Name**: `n8n Workspace`.
-4. **Application Domain**: `n8n.yourdomain.com`.
+3. **Application Name**: `n8n Workspace (Admin)`.
+4. **Application Domain**:
+   - Subdomain: `n8n`
+   - Domain: `yourdomain.com`
+   - Path: *(Leave empty)*
 5. Under **Policies**:
    - **Policy Name**: `Allow Owner Only`.
    - **Action**: `Allow`.
    - **Include**: Rule `Emails` -> enter your personal email address.
-6. Now, any human visiting the URL must enter a one-time code sent to your email.
+6. Click **Save application**.
+*(Now, anyone visiting `https://n8n.yourdomain.com/` is challenged with a one-time login PIN sent to your email).*
 
-### 2. Webhook & Health Check Bypass Policy
-Third-party webhooks and Uptime monitoring need to hit n8n without entering an email PIN:
-1. In the same Application under **Policies**, click **Add policy**.
-2. **Policy Name**: `Bypass Webhooks & Healthz`.
-3. **Action**: `Bypass`.
-4. **Include**:
-   - Selector: `Path`
-   - Operator: `starts with`
-   - Value: `/webhook/`
-5. Add additional rules for `/webhook-test/` and `/healthz`.
-6. Ensure the `Bypass` policy is prioritized **above** the `Allow` policy.
+### 2. Webhook & Health Check Bypass (Two-Application Architecture)
+Because Cloudflare evaluates applications from most specific to least specific, we create a second Access application specifically to allow inbound webhooks and uptime checks:
+1. In **Access > Applications**, click **Add an application** (Self-hosted).
+2. **Application Name**: `n8n Webhook & Healthz Bypass`.
+3. **Application Domain**:
+   - Subdomain: `n8n`
+   - Domain: `yourdomain.com`
+   - **Path**: `webhook*`
+4. Under **Policies**:
+   - **Policy Name**: `Bypass Webhooks`.
+   - **Action**: `Bypass`.
+   - **Include**: Select **`Everyone`**.
+5. Click **Save application**.
+6. *(Optional)*: Create an identical Bypass application with Path: `healthz` for UptimeRobot monitoring.
 
-### 3. Search Engine Cloaking
-- Cloudflare Access automatically blocks web spiders (Googlebot, Bingbot) from reaching n8n.
-- To guarantee zero indexing across search engines, add an HTTP header in **Cloudflare Dashboard > Rules > Transform Rules > Modify Response Header**:
-  - Name: `Block Crawlers`
-  - Condition: `Hostname equals n8n.yourdomain.com`
-  - Header: `X-Robots-Tag` = `noindex, nofollow, noarchive, nosnippet`
+### 3. Search Engine & AI Crawler Cloaking
+1. **Search Engine Cloaking (`X-Robots-Tag`)**:
+   - In Cloudflare Dashboard, go to **Rules > Overview > Transform Rules (Modify Response Header)**:
+   - Click **Create rule**.
+   - Rule name: `Block Search Indexing`
+   - When incoming requests match: `Hostname equals n8n.yourdomain.com`
+   - Then: Set static header `X-Robots-Tag` = `noindex, nofollow, noarchive, nosnippet`
+   - Click **Deploy**.
+2. **Block AI Scrapers and Crawlers (1-Click)**:
+   - In Cloudflare Dashboard, navigate to **Security > Bots**.
+   - Toggle **"Block AI scrapers and crawlers"** to **ON**.
+   - This automatically blocks OpenAI (GPTBot), Anthropic (ClaudeBot), Perplexity, Bytespider, and all known AI training bots at the edge.
 
 ### 4. Enable 2FA in n8n
-1. Open `https://n8n.yourdomain.com` and create your Admin account.
-2. Go to **Settings > Personal > Security** and turn on **Two-Factor Authentication (2FA)** using your authenticator app.
+1. Open `https://n8n.yourdomain.com` and log in via your email PIN.
+2. Complete initial registration to create your n8n Admin account.
+3. Navigate to **Settings > Personal > Security** and turn on **Two-Factor Authentication (2FA)** using your authenticator app (Google Authenticator, 1Password, Bitwarden).
 
 ---
 
@@ -310,7 +353,7 @@ Third-party webhooks and Uptime monitoring need to hit n8n without entering an e
 ### 1. Connecting External Services (OAuth 2.0 & API Keys)
 In n8n, credentials for external services (APIs, SaaS tools, cloud storage, databases) are encrypted and stored in your PostgreSQL database:
 
-#### For OAuth 2.0 Integrations (e.g. Cloud Storage, CRM, Messaging):
+#### For OAuth 2.0 Integrations:
 1. In the target service's developer portal, create an OAuth app.
 2. Set the **Authorized Redirect URI** (Callback URL) to:
    ```text
@@ -369,13 +412,60 @@ The stack is architected with three levels of automated recovery so it heals its
 
 ## Step 9: Intrusion Detection & Security Alerts
 
-Because Cloudflare Tunnel keeps all web ports closed, attackers cannot scan or access n8n directly from the internet. However, to stay alerted in real-time against brute-force attempts, compromised keys, or unauthorized access, configure these automated alert channels:
+Because Cloudflare Tunnel keeps all web ports closed, attackers cannot scan or access n8n directly from the internet. However, to stay alerted in real-time against unauthorized logins, configure these automated alert channels:
 
 ### 1. Instant SSH Terminal Login Alerts
-If anyone (including you or an attacker) successfully accesses the GCP VM via SSH, receive an immediate notification on your phone/email.
+If anyone (including you or an attacker) successfully accesses the GCP VM via SSH, receive an immediate notification via Email, Discord, or Telegram.
 
-Create a login alert hook on the server:
+#### Option A: Email Alerts via Python (Zero Dependencies)
+Ubuntu includes Python 3 by default. You can send email alerts directly to your inbox using a Gmail App Password:
 
+1. Create a script `/usr/local/bin/send-alert-email.py`:
+   ```bash
+   sudo tee /usr/local/bin/send-alert-email.py > /dev/null << 'EOF'
+   import sys, smtplib
+   from email.message import EmailMessage
+
+   GMAIL_USER = "your_email@gmail.com"
+   GMAIL_APP_PASS = "abcdefghijklmnop"  # 16-character Google App Password (no spaces)
+   TO_EMAIL = "your_email@gmail.com"
+
+   subject = sys.argv[1] if len(sys.argv) > 1 else "Security Alert"
+   body = sys.argv[2] if len(sys.argv) > 2 else "SSH login detected."
+
+   msg = EmailMessage()
+   msg['Subject'] = subject
+   msg['From'] = f"Server Monitor <{GMAIL_USER}>"
+   msg['To'] = TO_EMAIL
+   msg.set_content(body)
+
+   try:
+       with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+           smtp.login(GMAIL_USER, GMAIL_APP_PASS)
+           smtp.send_message(msg)
+   except Exception:
+       pass
+   EOF
+   sudo chmod +x /usr/local/bin/send-alert-email.py
+   ```
+2. Trigger it on SSH login in `/etc/profile.d/ssh-login-alert.sh`:
+   ```bash
+   sudo tee /etc/profile.d/ssh-login-alert.sh > /dev/null << 'EOF'
+   #!/bin/bash
+   if [ -n "$SSH_CLIENT" ]; then
+       CLIENT_IP=$(echo $SSH_CLIENT | awk '{print $1}')
+       HOSTNAME=$(hostname)
+       TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
+       SUBJECT="🚨 [Security Alert] SSH Login on ${HOSTNAME}"
+       BODY="SSH login detected!\n\nUser: ${USER}\nIP: ${CLIENT_IP}\nTimestamp: ${TIMESTAMP}"
+       python3 /usr/local/bin/send-alert-email.py "$SUBJECT" "$BODY" > /dev/null 2>&1 &
+   fi
+   EOF
+   sudo chmod +x /etc/profile.d/ssh-login-alert.sh
+   ```
+
+#### Option B: Discord Webhook Alert
+If you prefer Discord notifications:
 ```bash
 sudo tee /etc/profile.d/ssh-login-alert.sh > /dev/null << 'EOF'
 #!/bin/bash
@@ -384,29 +474,19 @@ if [ -n "$SSH_CLIENT" ]; then
     HOSTNAME=$(hostname)
     TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
     MESSAGE="🚨 Security Alert: SSH login on ${HOSTNAME} by user '${USER}' from IP: ${CLIENT_IP} at ${TIMESTAMP}"
-    
-    # Example A: Free Discord Webhook
-    # curl -s -H "Content-Type: application/json" -X POST -d "{\"content\":\"$MESSAGE\"}" "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL"
-    
-    # Example B: Free Telegram Bot
-    # curl -s -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendMessage" -d chat_id="<YOUR_CHAT_ID>" -d text="$MESSAGE"
+    curl -s -H "Content-Type: application/json" -X POST -d "{\"content\":\"$MESSAGE\"}" "YOUR_DISCORD_WEBHOOK_URL" > /dev/null 2>&1 &
 fi
 EOF
-
 sudo chmod +x /etc/profile.d/ssh-login-alert.sh
 ```
-
-*Result*: Every time a shell session opens, you get an instant ping. If your phone buzzes and you aren't logging in, you know someone has breached your host.
 
 ---
 
 ### 2. Cloudflare Tunnel Health & Security Monitoring
-Cloudflare monitors tunnel connectivity and inspects all inbound traffic at the edge before it ever reaches your server:
-
 1. **Tunnel Health Alert (Free)**:
    - In Cloudflare Dashboard, go to **Notifications > Add**.
-   - Filter Product by **Tunnel** (or scroll down) and select **Tunnel Health Alert**.
-   - This sends an immediate email if your server tunnel drops, goes offline, or disconnects.
+   - Filter Product by **Tunnel** and select **Tunnel Health Alert**.
+   - Receive an immediate email if your VM tunnel drops, goes offline, or disconnects.
 2. **Security & WAF Analytics (Free)**:
    - Under your domain, navigate to **Security > Events**.
    - Cloudflare logs every blocked request, crawler rejection, and Access challenge in real-time.
@@ -467,7 +547,7 @@ Add a daily automated backup cron job (`crontab -e`):
 n8n-selfhost-setup/
 ├── .env.example          # Environment template with explanations
 ├── .gitignore            # Protects credentials and local storage
-├── docker-compose.yml    # n8n + PostgreSQL 16 (GCP e2-micro optimized)
+├── docker-compose.yml    # n8n + PostgreSQL 16 (GCP e2-micro optimized + autoheal)
 └── README.md             # Complete step-by-step setup guide for GCP
 ```
 
